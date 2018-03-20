@@ -1,0 +1,232 @@
+import ROOT
+from ROOT import *
+import sys
+import math
+from array import array
+import functools
+from multiprocessing import Pool
+import scipy
+sys.path.append('/home/marc/code/python/')
+import PlottingFunctions
+import RootHelperFunctions
+
+
+# WE NEED TO COMPUTE THESE DDT MAPS:
+#1 --- MC FULL SELECTION
+#2 --- MC ETA > 2.1
+#3 --- DATA ETA > 2.1
+
+
+def ComputeDDT(name, point, nPtBins, nRhoBins, H):
+	DDT = TH2F(name, "", nRhoBins, -9.0, -1.0, nPtBins, 200, 1000)
+	DDT.SetStats(0)
+	nXb = H.GetXaxis().GetNbins()
+	nYb = H.GetYaxis().GetNbins()
+	for x in range(nXb):
+		for y in range(nYb):
+			proj = H.ProjectionZ(name + "H3"+str(x)+str(y),x+1,x+1,y+1,y+1)
+			p = array('d', [point])
+			q = array('d', [0.0]*len(p))
+			proj.GetQuantiles(len(p), q, p)
+			DDT.SetBinContent( x+1, y+1, q[0] );
+	return DDT
+
+
+grho = 0
+gpT = 0
+nRB = int(sys.argv[3])
+nPT = int(sys.argv[3])
+gDRVAL = float(sys.argv[2])*0.5
+Vcut = float(sys.argv[1])/100.
+
+class DDTPoint:
+	def __init__(self,r,p,n,w):
+		self.rho = r
+		self.pT = p
+		self.N2 = n
+		self.weight = w
+	def GetSortNearestCrit(self, o):
+		Drho = math.fabs(self.rho - o.rho)/5.5
+		DpT = math.fabs(self.pT - o.pT)/800.
+		return (Drho*Drho) + (DpT*DpT)
+	def GetSortNearestGlobal(self, pt, rho):
+		Drho = math.fabs(self.rho - rho)/5.5
+		DpT = math.fabs(self.pT - pt)/800.
+		return (Drho*Drho) + (DpT*DpT)
+def SortByNearest(p1): # Compare to global (recently set) parameter
+	return p1.GetSortNearestGlobal(gpT, grho)
+def SortByN2(p1):
+	return p1.N2
+def DoOneRhoBinMC(rRr):
+	global grho
+	grho = -7.5 + 5.5*rRr/float(nRB) + (1./float(nRB))
+	Gs = []
+	print "Filling rho = " + str(grho) + ""
+	F = TFile("gjets.root")
+	T = F.Get("tree")
+	n = T.GetEntries()
+	pointsF = []
+	pointsEta = []
+	for j in range(0, n):# Here is where we loop over all events.
+		T.GetEntry(j)
+		if T.SR < 0.: continue
+		dRHO = math.fabs(T.rho - grho)
+		if dRHO < gDRVAL:
+			pointsF.append(DDTPoint(T.rho, T.pT, T.N2, T.weight*T.puW*T.TrigW*T.kfNLO))
+			if math.fabs(T.PhoEta) < 2.1: continue
+			pointsEta.append(DDTPoint(T.rho, T.pT, T.N2, T.weight*T.puW*T.TrigW*T.kfNLO))
+	POINTSARRAY = [pointsF, pointsEta]
+	for POINTS in POINTSARRAY:
+		ptbins = nPT
+		G = []
+		for ip in range(0,ptbins):
+			global gpT
+			gpT = 200. + ip*800./float(ptbins) + (400./float(ptbins))
+			tW = 0.
+			newPoints = []
+			for p in POINTS:
+				nR = math.fabs(p.rho - grho)/5.5
+				nP = math.fabs(p.pT - gpT)/800.
+				nW = 1./(0.001+math.sqrt(nR*nR + nP*nP))
+				newPoints.append(DDTPoint(p.rho, p.pT, p.N2, p.weight*nW))
+				tW += p.weight*nW
+			sortedNP = sorted(newPoints, key=SortByN2)
+			pN2 = -1.
+			pW = 0.
+			ID = 0.
+			for p in range(len(sortedNP)):
+				W = sortedNP[p].weight
+				pW += W
+				if pW/tW < Vcut: continue
+				pN2 = sortedNP[p].N2
+				ID = p
+				break
+			pDelta = (pW - Vcut*tW)/sortedNP[ID].weight
+			BIN = [grho, gpT, sortedNP[ID].N2*pDelta + sortedNP[max(ID-1,0)].N2*(1.-pDelta)]
+			G.append(BIN)
+		Gs.append(G)
+	return Gs
+
+def DoOneRhoBinDATA(rRr):
+	global grho
+	grho = -7.5 + 5.5*rRr/float(nRB) + (1./float(nRB))
+	Gs = []
+	print "Filling rho = " + str(grho) + ""
+	F = TFile("data.root")
+	T = F.Get("tree")
+	n = T.GetEntries()
+	points = []
+	for j in range(0, n):# Here is where we loop over all events.
+		T.GetEntry(j)
+		if T.SR < 0. or math.fabs(T.PhoEta) < 2.1: continue
+		dRHO = math.fabs(T.rho - grho)
+		if dRHO < gDRVAL:
+			points.append(DDTPoint(T.rho, T.pT, T.N2, T.weight*T.puW*T.TrigW*T.kfNLO))
+	POINTSARRAY = [points]
+	for POINTS in POINTSARRAY:
+		ptbins = nPT
+		G = []
+		for ip in range(0,ptbins):
+			global gpT
+			gpT = 200. + ip*800./float(ptbins) + (400./float(ptbins))
+			tW = 0.
+			newPoints = []
+			for p in POINTS:
+				nR = math.fabs(p.rho - grho)/5.5
+				nP = math.fabs(p.pT - gpT)/800.
+				nW = 1./(0.001+math.sqrt(nR*nR + nP*nP))
+				newPoints.append(DDTPoint(p.rho, p.pT, p.N2, p.weight*nW))
+				tW += p.weight*nW
+			sortedNP = sorted(newPoints, key=SortByN2)
+			pN2 = -1.
+			pW = 0.
+			ID = 0.
+			for p in range(len(sortedNP)):
+				W = sortedNP[p].weight
+				pW += W
+				if pW/tW < Vcut: continue
+				pN2 = sortedNP[p].N2
+				ID = p
+				break
+			pDelta = (pW - Vcut*tW)/sortedNP[ID].weight
+			BIN = [grho, gpT, sortedNP[ID].N2*pDelta + sortedNP[max(ID-1,0)].N2*(1.-pDelta)]
+			G.append(BIN)
+		Gs.append(G)
+	return Gs
+
+if __name__ == '__main__':
+	print "DDTs for " + str(int(100*Vcut))+"%"
+
+	RB = 27
+	PB = 27
+
+	H3MCF = TH3F("H3_MC_Full", ";Jet #rho;Jet p_{T} (GeV)", RB, -9.0, -1.0, PB, 200., 1000., 750, 0., 0.75)
+	H3MCF.SetStats(0)
+	H3MCETA = TH3F("H3_MC_EtaSB", ";Jet #rho;Jet p_{T} (GeV)", RB, -9.0, -1.0, PB, 200., 1000., 750, 0., 0.75)
+	H3MCETA.SetStats(0)
+	H3DATA = TH3F("H3_Data", ";Jet #rho;Jet p_{T} (GeV)", RB, -9.0, -1.0, PB, 200., 1000., 750, 0., 0.75)
+	H3DATA.SetStats(0)
+	F = TFile("nonres.root")
+	T = F.Get("tree")
+	n = T.GetEntries()
+	for j in range(0, n): # Here is where we loop over all events.
+		T.GetEntry(j)
+		if T.SR > 0.:
+			H3MCF.Fill(T.rho, T.pT, T.N2, T.weight*T.puW*T.TrigW*T.kfNLO)
+			if math.fabs(T.PhoEta)  < 2.1: continue
+			H3MCETA.Fill(T.rho, T.pT, T.N2, T.weight*T.puW*T.TrigW*T.kfNLO)
+	F = TFile("data.root")
+	T = F.Get("tree")
+	n = T.GetEntries()
+	for j in range(0, n): # Here is where we loop over all events.
+		T.GetEntry(j)
+		if T.SR > 0. and math.fabs(T.PhoEta) > 2.1:
+			H3DATA.Fill(T.rho, T.pT, T.N2, T.weight*T.puW*T.TrigW*T.kfNLO)
+	ddtMCF = ComputeDDT("Binned_N2DDT_MCF", Vcut, PB, RB, H3MCF)
+	ddtMCETA = ComputeDDT("Binned_N2DDT_MCETA", Vcut, PB, RB, H3MCETA)
+	ddtDATA = ComputeDDT("Binned_N2DDT_DATA", Vcut, PB, RB, H3DATA)
+
+
+	p = Pool(22)
+	SMOOTHMCF = TH2F("Smooth_N2DDT_MCF", ";Jet #rho;Jet p_{T} (GeV)", nRB, -7.5, -2.0, nPT, 200., 1000.)
+	SMOOTHMCETA = TH2F("Smooth_N2DDT_MCETA", ";Jet #rho;Jet p_{T} (GeV)", nRB, -7.5, -2.0, nPT, 200., 1000.)
+	SMOOTHDATA = TH2F("Smooth_N2DDT_DATA", ";Jet #rho;Jet p_{T} (GeV)", nRB, -7.5, -2.0, nPT, 200., 1000.)
+	SMOOTHMCF.SetStats(0)
+	SMOOTHMCETA.SetStats(0)
+	SMOOTHDATA.SetStats(0)
+	SmoothedMC = p.map(DoOneRhoBinMC, range(0,nRB))
+	SmoothedDATA = p.map(DoOneRhoBinDATA, range(0,nRB))
+	for S in SmoothedMC: # this is a rhobin
+		for s in S[0]: # this is each of the 2 smooths
+			BINX = SMOOTHMCF.GetXaxis().FindBin(s[0])
+			BINY = SMOOTHMCF.GetYaxis().FindBin(s[1])
+			SMOOTHMCF.SetBinContent(BINX, BINY, s[2])
+		for s in S[1]: # this is each of the 2 smooths
+			BINX = SMOOTHMCETA.GetXaxis().FindBin(s[0])
+			BINY = SMOOTHMCETA.GetYaxis().FindBin(s[1])
+			SMOOTHMCETA.SetBinContent(BINX, BINY, s[2])
+	for S in SmoothedDATA: # this is a rhobin
+		for s in S[0]: # this is each of the 2 smooths
+			BINX = SMOOTHDATA.GetXaxis().FindBin(s[0])
+			BINY = SMOOTHDATA.GetYaxis().FindBin(s[1])
+			SMOOTHDATA.SetBinContent(BINX, BINY, s[2])
+
+	if sys.argv[2] != "1": OF = "DDTs_OVERSMEAR_"+str(int(Vcut*100))+".root"
+	else: OF = "DDTs"+str(int(Vcut*100))+"_"+sys.argv[3]+"_"+sys.argv[2]+".root"
+	
+
+	Fout = TFile(OF, "recreate")
+	Fout.cd()
+
+	ddtMCF.Write()
+	ddtMCETA.Write()
+	ddtDATA.Write()
+
+	SMOOTHMCF.Write()
+	SMOOTHMCETA.Write()
+	SMOOTHDATA.Write()
+
+	Fout.Write()
+	Fout.Save()
+	Fout.Close()
+
