@@ -1,0 +1,70 @@
+python Zqq_create.py
+python buildRhalphabet.py -b --np 3 --nr 3
+python makeCards.py --np 3 --nr 3
+cd cards
+combineCards.py card_rhalphabet_cat1.txt card_rhalphabet_cat2.txt card_rhalphabet_cat3.txt card_rhalphabet_cat4.txt card_rhalphabet_cat5.txt > ../cards_SRall.txt
+cd ..
+combine -M MaxLikelihoodFit cards_SRall.txt --saveWithUncertainties --saveShapes -v 2 --rMin -50 --rMax 50
+python ResultsPlotter.py --W fit_b
+python ResultsPlotter.py --W prefit
+ls
+
+
+
+combine -M Asymptotic cards_SRall.txt --rMin -50 --rMax 50
+
+
+
+
+python validateMLFit.py -b --fit prefit 
+python validateMLFit.py -b --fit fit_b
+display plots/mlfit/mlfit_pass_allcats_fit_b_50.png
+ls
+ls
+
+6.97
+0.0784
+
+python validateMLFit.py -b --fit prefit 
+python validateMLFit.py -b --fit fit_b
+display plots/mlfit/mlfit_pass_allcats_fit_b_100.png
+ls
+
+
+
+python buildRhalphabet.py -b --np 2 --nr 2
+python makeCards.py --np 2 --nr 2
+cd cards
+combineCards.py card_rhalphabet_cat1.txt card_rhalphabet_cat2.txt card_rhalphabet_cat3.txt card_rhalphabet_cat4.txt card_rhalphabet_cat5.txt > ../cards_22all.txt
+cd ..
+python buildRhalphabet.py -b --np 2 --nr 3
+python makeCards.py --np 2 --nr 3
+cd cards
+combineCards.py card_rhalphabet_cat1.txt card_rhalphabet_cat2.txt card_rhalphabet_cat3.txt card_rhalphabet_cat4.txt card_rhalphabet_cat5.txt > ../cards_23all.txt
+cd ..
+python buildRhalphabet.py -b --np 3 --nr 2
+python makeCards.py --np 3 --nr 2
+cd cards
+combineCards.py card_rhalphabet_cat1.txt card_rhalphabet_cat2.txt card_rhalphabet_cat3.txt card_rhalphabet_cat4.txt card_rhalphabet_cat5.txt > ../cards_32all.txt
+cd ..
+python buildRhalphabet.py -b --np 3 --nr 3
+python makeCards.py --np 3 --nr 3
+cd cards
+combineCards.py card_rhalphabet_cat1.txt card_rhalphabet_cat2.txt card_rhalphabet_cat3.txt card_rhalphabet_cat4.txt card_rhalphabet_cat5.txt > ../cards_33all.txt
+cd ..
+python buildRhalphabet.py -b --np 3 --nr 4
+python makeCards.py --np 3 --nr 4
+cd cards
+combineCards.py card_rhalphabet_cat1.txt card_rhalphabet_cat2.txt card_rhalphabet_cat3.txt card_rhalphabet_cat4.txt card_rhalphabet_cat5.txt > ../cards_34all.txt
+cd ..
+python buildRhalphabet.py -b --np 4 --nr 3
+python makeCards.py --np 4 --nr 3
+cd cards
+combineCards.py card_rhalphabet_cat1.txt card_rhalphabet_cat2.txt card_rhalphabet_cat3.txt card_rhalphabet_cat4.txt card_rhalphabet_cat5.txt > ../cards_43all.txt
+cd ..
+python FTest.py
+ls *.png
+
+
+
+
