@@ -1,0 +1,27 @@
+#!/bin/bash
+
+echo "------------------------"
+
+mv OUTPUT_$1/card.txt .
+mv OUTPUT_$1/base.root .
+mv OUTPUT_$1/ralphabase.root .
+
+cp templates/blanklimits.txt FullLimits_wC_$1.txt
+sed -i 's/zqq50/SIGMASS/g' card.txt
+masses='zqq10 zqq15 zqq20 zqq25 zqq30 zqq35 zqq40 zqq45 zqq50 zqq55 zqq60 zqq65 zqq70 zqq75 zqq80 zqq85 zqq90 zqq95 zqq100 zqq105 zqq110 zqq115 zqq120 zqq125'
+for mass in $masses
+do
+echo " -=-=-=-=-=-=-=-=-=-=-=-=-=-"
+echo $mass
+echo " -=-=-=-=-=-=-=-=-=-=-=-=-=-"
+sed -i 's/SIGMASS/'$mass'/g' card.txt
+combine -M Asymptotic card.txt --rMin -5 --rMax 100
+python GetLimitsForPoint.py FullLimits_wC_$1.txt
+sed -i 's/'$mass'/SIGMASS/g' card.txt
+done	
+
+python AddToLimitPlot.py $1
+
+mv card.txt OUTPUT_$1/
+mv base.root OUTPUT_$1/
+mv ralphabase.root OUTPUT_$1/
