@@ -1,0 +1,336 @@
+#
+import ROOT,sys,math,array,os
+from ROOT import *
+from multiprocessing import Process
+from optparse import OptionParser
+from operator import add
+import math
+import sys
+import time
+import array
+
+trymeout = "sadfsadlkjflasdjf;alsdkjf;lasdjfkl;asdjf;klasdjf;lkasjdfkl;ajsdl;fjsdaal;kfjas;dlkfjklasd;jf;lasdjf;lksadjf;lkajsdf"
+
+global DIR
+DIR = ""
+global skipBKG
+skipBKG = False
+
+gROOT.SetBatch(kTRUE)
+
+def convertAsymGraph(TG, Axis, name):
+	Hist = Axis.Clone(name)
+	for i in range(1,Hist.GetNbinsX()+1):
+		Hist.SetBinContent(i,0.)
+	for i in range(TG.GetN()):
+		Hist.Fill(TG.GetX()[i],TG.GetY()[i]*(TG.GetErrorXlow(i)+TG.GetErrorXhigh(i)))
+	for i in range(1,Hist.GetNbinsX()+1):
+		Hist.SetBinError(i,math.sqrt(Hist.GetBinContent(i)))
+	return Hist
+
+def FindAndSetMax(*someset):
+        maximum = 0.0
+        for i in someset:
+                i.SetStats(0)
+                t = i.GetMaximum()
+                if t > maximum:
+                        maximum = t
+        for j in someset:
+                j.GetYaxis().SetRangeUser(0,maximum*1.35)
+
+def plotCategory(ML, F, i, mass, fit, which):
+	print "Plotting Category tagged as " + str(i)
+	shapes = ['wqq','zqq','tqq','qcd','zqq'+str(mass)]
+	if skipBKG: shapes = ['tqq','qcd']
+	cats   = ['pass','fail']
+	histograms_fail = [];
+	histograms_pass = [];
+	for num,shapename in enumerate(shapes):
+		print "looking in " + which + "/ch%i_fail_cat%i/%s" % (i,i,shapename)
+		if shapename == 'zqq'+str(mass):
+			histograms_fail.append( ML.Get("shapes_prefit/ch%i_fail_cat%i/%s" % (i,i,shapename)))
+			histograms_pass.append( ML.Get("shapes_prefit/ch%i_pass_cat%i/%s" % (i,i,shapename)))
+			rags = ML.Get("norm_prefit")
+		else:
+			histograms_fail.append( ML.Get("shapes_"+which+"/ch%i_fail_cat%i/%s" % (i,i,shapename)))
+			histograms_pass.append( ML.Get("shapes_"+which+"/ch%i_pass_cat%i/%s" % (i,i,shapename)))
+			rags = ML.Get("norm_"+which)
+		#rags.Print()
+		rrv_fail = RooRealVar(rags.find("ch%i_fail_cat%i/%s" % (i,i,shapename)))
+		curnorm_fail = rrv_fail.getVal()
+		rrv_pass = RooRealVar(rags.find("ch%i_pass_cat%i/%s" % (i,i,shapename)))
+		curnorm_pass = rrv_pass.getVal()
+
+		if curnorm_fail > 0.: histograms_fail[num].Scale(curnorm_fail/histograms_fail[num].Integral())
+		if curnorm_pass > 0.: histograms_pass[num].Scale(curnorm_pass/histograms_pass[num].Integral())
+
+
+		print str(curnorm_fail)  + " failing events"
+		print str(curnorm_pass) + " passing events"
+	
+	histograms_fail.append(convertAsymGraph(ML.Get("shapes_"+which+"/ch%i_fail_cat%i/data" % (i,i)),histograms_fail[0],"shapes_"+which+"/ch%i_fail_cat%i/data"))
+	histograms_pass.append(convertAsymGraph(ML.Get("shapes_"+which+"/ch%i_pass_cat%i/data" % (i,i)),histograms_fail[0],"shapes_"+which+"/ch%i_pass_cat%i/data"))
+
+	print "Failing Data Events: " + str(histograms_fail[5].Integral())
+	print "Passing Data Events: " + str(histograms_pass[5].Integral())
+	if not skipBKG:
+		MakeCanvas(histograms_fail, which+"_fail_cat"+str(i), which, mass)
+		MakeCanvas(histograms_pass, which+"_pass_cat"+str(i), which, mass)
+	return (histograms_fail, histograms_pass)
+
+	# after:
+def FORMAT(hists):
+	hists[3].SetTitle("")
+	hists[3].SetLineStyle(2)
+	hists[3].SetLineColor(kBlue)
+	hists[0].SetLineWidth(2)
+	hists[1].SetLineWidth(2)
+	hists[2].SetLineWidth(2)
+	hists[3].SetLineWidth(2)
+	hists[3].SetStats(0)
+	hists[3].GetXaxis().SetTitle("Jet Soft Drop Mass (GeV)")
+	hists[3].GetYaxis().SetTitle("Events / 5 GeV")
+	hists[3].GetYaxis().SetTitleOffset(1.35)
+	hists[4].SetFillStyle(3001)
+	hists[4].SetFillColor(kOrange)
+	hists[4].SetLineColor(kOrange)
+	hists[2].SetLineColor(kRed)
+	hists[1].SetLineColor(kViolet)
+	hists[0].SetLineColor(kGreen)
+	hists[5].SetMarkerColor(1)
+	hists[5].SetLineColor(1)
+	hists[5].SetMarkerStyle(10)
+def MakeCanvas(hists, name, which, M):
+	FORMAT(hists)
+	print "Creating CANVAS for " + name
+	htot = hists[3].Clone("htot"+name)
+	for i in range(0,3): htot.Add(hists[i])
+	htot.SetLineStyle(1)
+
+	FindAndSetMax(htot, hists[5])
+	Errors = GetErrorBand(htot)
+
+
+	L = TLegend(0.6,0.5,0.89,0.89)
+	L.SetLineColor(0)
+	L.SetFillColor(0)
+	L.AddEntry(hists[5], "data", "PL")
+	L.AddEntry(hists[0], "W + #gamma", "L")
+	L.AddEntry(hists[1], "Z + #gamma", "L")
+	L.AddEntry(hists[2], "SM t#bar{t}", "L")
+	L.AddEntry(hists[3], "#gamma + Jets and QCD", "L")
+	L.AddEntry(htot, "Total Background", "L")
+	L.AddEntry(hists[4], "Z'_{"+str(M)+"} + #gamma", "F")
+
+
+	C = TCanvas("C"+name, "", 750, 600)
+	p12 = TPad("pad1"+name, "The pad 80% of the height",0,0.15,1,1)
+	p22 = TPad("pad2"+name, "The pad 20% of the height",0,0,1.0,0.15)
+	p12.Draw()
+	p22.Draw()
+	p12.cd()
+	htot.Draw("hist")
+	hists[4].Draw("histsame")
+	hists[3].Draw("histsame")
+	hists[2].Draw("histsame")
+	hists[1].Draw("histsame")
+	hists[0].Draw("histsame")
+	for e in Errors: e.Draw("same")
+	hists[5].Draw("e0same")
+	L.Draw("same")
+
+	p22.cd()
+	p22.SetGrid()
+
+
+	iSig = hists[4].Clone("isig"+name)
+	iSig.Add(htot)
+	for i in range(iSig.GetNbinsX()):
+		s = iSig.GetBinContent(i+1)
+		h = htot.GetBinContent(i+1)
+		if h > 0.0001 and s > 0.0001:
+			iSig.SetBinContent(i+1, s/h)
+		else:
+			iSig.SetBinContent(i+1, 1)
+
+	iRatio = hists[5].Clone("iR"+name);
+	iRatio.SetTitle(";;Data/Prediction")	
+	iRatio.Divide(htot)
+	iRatio.SetMaximum(1.5);
+	iRatio.SetMinimum(1.5);
+	iRatio.GetYaxis().SetTitleSize(0.13);
+	iRatio.GetYaxis().SetNdivisions(6);
+	iRatio.GetYaxis().SetLabelSize(0.12);
+	iRatio.GetYaxis().SetTitleOffset(0.33);
+	iRatio.GetXaxis().SetTitleSize(0.12);
+	iRatio.GetXaxis().SetLabelSize(0.12);
+	iRatio.GetXaxis().SetTitleOffset(0.9);
+	iRatio.GetYaxis().SetRangeUser(0.51,1.49);
+	iOneWithErrors = htot.Clone("one"+name)
+	for i in range(iOneWithErrors.GetNbinsX()): 
+		if htot.GetBinContent(i+1) > 0: 
+			iOneWithErrors.SetBinError( i+1, htot.GetBinError(i+1)/htot.GetBinContent(i+1) );
+			iOneWithErrors.SetBinContent(i+1,1)
+		else: 
+			iOneWithErrors.SetBinError( i+1, 1);
+			iOneWithErrors.SetBinContent(i+1,1)
+		
+	iOneWithErrors.SetFillStyle(3144);
+	iOneWithErrors.SetFillColor(25);
+	iOneWithErrors.SetMarkerSize(0);
+	iOneWithErrors.SetLineWidth(0);
+
+	iSig.SetFillStyle(0)
+	iSig.SetLineWidth(2)
+	iRatio.Draw("e0");
+	if which != "prefit":
+		iOneWithErrors.Draw("e2 sames");
+	iSig.Draw("histsame")
+	iRatio.Draw("same e0");
+
+
+	C.Print(DIR+"/"+name+".png")
+	C.Print(DIR+"/"+name+".root")
+	del htot; del p12; del p22; del C; del iOneWithErrors; del iRatio;
+def GetErrorBand(H):
+	E = []
+	for i in range(1,H.GetNbinsX()+1):
+		blX = H.GetBinLowEdge(i)
+		blY = H.GetBinContent(i) - H.GetBinError(i)
+		trX = H.GetBinWidth(i) + blX
+		trY = H.GetBinContent(i) + H.GetBinError(i)
+		tBox = TBox(blX,blY,trX,trY)
+		tBox.SetFillColor(25)
+		tBox.SetFillStyle(3144)
+		E.append(tBox)
+	return E
+def DoAllPlots(mass, which, n):
+	print "START"
+	ML = TFile("mlfit.root");
+	F =TFile("base33.root");
+	passHists = []
+	failHists = []
+	for i in range(int(n)): 
+		(tF, tP) = plotCategory(ML, F, i+1, mass, False, which)
+		passHists.append(tP)
+		failHists.append(tF)
+	for i in range(1,int(n)):
+		for j in range(len(passHists[0])):
+			passHists[0][j].Add(passHists[i][j])
+			failHists[0][j].Add(failHists[i][j])
+	if not skipBKG:
+		MakeCanvas(failHists[0], which + "_fail_cat_ALL", which, 50)
+		MakeCanvas(passHists[0], which + "_pass_cat_ALL", which, 50)
+	else:
+		MakeTTCanvas(failHists[0], which + "_fail_cat_ALL", which, 50)
+		MakeTTCanvas(passHists[0], which + "_pass_cat_ALL", which, 50)
+
+
+
+def FORMATTT(hists):
+	hists[1].SetTitle("")
+	hists[1].SetLineStyle(2)
+	hists[1].SetLineColor(kBlue)
+	hists[0].SetLineWidth(2)
+	hists[1].SetStats(0)
+	hists[1].GetXaxis().SetTitle("Jet Soft Drop Mass (GeV)")
+	hists[1].GetYaxis().SetTitle("Events / 5 GeV")
+	hists[1].GetYaxis().SetTitleOffset(1.35)
+	hists[2].SetLineColor(kRed)
+	hists[3].SetMarkerColor(1)
+	hists[3].SetLineColor(1)
+	hists[3].SetMarkerStyle(10)
+def MakeTTCanvas(hists, name, which, M):
+	FORMATTT(hists)
+	print "Creating CANVAS for " + name
+	htot = hists[1].Clone("htot"+name)
+	htot.Add(hists[0])
+	htot.SetLineStyle(1)
+
+	FindAndSetMax(htot, hists[3])
+	Errors = GetErrorBand(htot)
+
+
+	L = TLegend(0.6,0.5,0.89,0.89)
+	L.SetLineColor(0)
+	L.SetFillColor(0)
+	L.AddEntry(hists[3], "data", "PL")
+	L.AddEntry(hists[0], "SM t#bar{t}", "L")
+	L.AddEntry(hists[1], "#gamma + Jets and QCD", "L")
+	L.AddEntry(htot, "Total Background", "L")
+
+
+	C = TCanvas("C"+name, "", 750, 600)
+	p12 = TPad("pad1"+name, "The pad 80% of the height",0,0.15,1,1)
+	p22 = TPad("pad2"+name, "The pad 20% of the height",0,0,1.0,0.15)
+	p12.Draw()
+	p22.Draw()
+	p12.cd()
+	htot.Draw("hist")
+	hists[1].Draw("histsame")
+	hists[0].Draw("histsame")
+	for e in Errors: e.Draw("same")
+	hists[3].Draw("e0same")
+	L.Draw("same")
+
+	p22.cd()
+	p22.SetGrid()
+
+
+
+	iRatio = hists[3].Clone("iR"+name);
+	iRatio.SetTitle(";;Data/Prediction")	
+	iRatio.Divide(htot)
+	iRatio.SetMaximum(1.5);
+	iRatio.SetMinimum(1.5);
+	iRatio.GetYaxis().SetTitleSize(0.13);
+	iRatio.GetYaxis().SetNdivisions(6);
+	iRatio.GetYaxis().SetLabelSize(0.12);
+	iRatio.GetYaxis().SetTitleOffset(0.33);
+	iRatio.GetXaxis().SetTitleSize(0.12);
+	iRatio.GetXaxis().SetLabelSize(0.12);
+	iRatio.GetXaxis().SetTitleOffset(0.9);
+	iRatio.GetYaxis().SetRangeUser(0.51,1.49);
+	iOneWithErrors = htot.Clone("one"+name)
+	for i in range(iOneWithErrors.GetNbinsX()): 
+		if htot.GetBinContent(i+1) > 0: 
+			iOneWithErrors.SetBinError( i+1, htot.GetBinError(i+1)/htot.GetBinContent(i+1) );
+			iOneWithErrors.SetBinContent(i+1,1)
+		else: 
+			iOneWithErrors.SetBinError( i+1, 1);
+			iOneWithErrors.SetBinContent(i+1,1)
+		
+	iOneWithErrors.SetFillStyle(3144);
+	iOneWithErrors.SetFillColor(25);
+	iOneWithErrors.SetMarkerSize(0);
+	iOneWithErrors.SetLineWidth(0);
+
+	iRatio.Draw("e0");
+	if which != "prefit":
+		iOneWithErrors.Draw("e2 sames");
+	iRatio.Draw("same e0");
+
+
+	C.Print(DIR+"/"+name+".png")
+	C.Print(DIR+"/"+name+".root")
+	del htot; del p12; del p22; del C; del iOneWithErrors; del iRatio;
+
+if __name__ == '__main__':
+	import optparse
+	from optparse import OptionParser
+	parser = OptionParser()
+
+	parser.add_option('--W', '--which', metavar='WHC', type='string', dest='which', default="prefit")
+
+	parser.add_option('--P', '--ptbins', metavar='PTB', type='string', dest='ptBins', default="5")
+
+	parser.add_option('--N', '--noback', metavar='NBG', type='string', dest='noBkg', default="no")
+
+	parser.add_option('--O', '--ouput', metavar='OUT', type='string', dest='o', default="TESTPLOTDUMPTESTPLOT")
+	(Options, args) = parser.parse_args()
+	DIR = Options.o
+	if not os.path.exists(DIR):
+   		os.makedirs(DIR)
+	if Options.noBkg == "yes": skipBKG = True
+	DoAllPlots(50, Options.which, Options.ptBins)
+
